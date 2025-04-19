@@ -436,7 +436,7 @@ async def get_ai_analysis(symbol: str, company_name: str, price: float, change: 
                     {
                         'role': 'user',
                         'content': f'Provide a brief analysis for {company_name} ({symbol}). Current price: ${price}, Change: {"+" + str(change) if change > 0 else str(change)}'
-                    }
+                   }
                 ],
                 'max_tokens': 300,
             }
@@ -480,4 +480,6 @@ async def get_status():
 # Uygulamayı çalıştırma (doğrudan bu dosya çalıştırıldığında)
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    import os
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run("main:app", host="0.0.0.0", port=port)
