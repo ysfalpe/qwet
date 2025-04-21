@@ -1,0 +1,26 @@
+# Environment variables
+.env
+*.env.*
+!\.env.example
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environment
+venv/
+env/
+ENV/
+*.venv
+
+# IDE and editor files
+.vscode/
+.idea/
+*.sublime-*
+*.DS_Store
+
+# Build artifacts
+dist/
+build/
+*.egg-info/

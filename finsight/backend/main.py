@@ -8,9 +8,14 @@ import json
 from dotenv import load_dotenv
 from typing import Dict, List, Optional, Any
 import time
+import logging
 
 # .env dosyasından çevresel değişkenleri yükle
 load_dotenv()
+
+# Loglamayı yapılandır
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Finsight Backend API", 
               description="Finnhub API ve OpenRouter API için önbellekleme ve proxy servisi",
@@ -28,6 +33,16 @@ app.add_middleware(
 # API anahtarları
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY")
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+
+# Yüklenen anahtarları (maskelenmiş olarak) logla
+logger.info(f"FINNHUB_API_KEY loaded: {FINNHUB_API_KEY[:5]}..." if FINNHUB_API_KEY else "FINNHUB_API_KEY not found!")
+logger.info(f"OPENROUTER_API_KEY loaded: {OPENROUTER_API_KEY[:5]}..." if OPENROUTER_API_KEY else "OPENROUTER_API_KEY not found!")
+
+# Anahtarların varlığını kontrol et
+if not FINNHUB_API_KEY:
+    logger.error("FINNHUB_API_KEY ortam değişkeni bulunamadı!")
+if not OPENROUTER_API_KEY:
+    logger.error("OPENROUTER_API_KEY ortam değişkeni bulunamadı!")
 
 # API URL'leri
 FINNHUB_BASE_URL = "https://finnhub.io/api/v1"
@@ -50,76 +65,89 @@ POPULAR_STOCKS = ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA', 'NVDA', 'JPM'
 
 # Finnhub API'den hisse fiyatlarını çekme
 def fetch_stock_quotes():
-    print(f"Hisse fiyatları güncelleniyor: {datetime.now()}")
+    logger.info(f"Hisse fiyatları güncelleniyor: {datetime.now()}")
+    if not FINNHUB_API_KEY:
+        logger.error("Finnhub API anahtarı eksik, hisse fiyatları çekilemiyor.")
+        return
+
     for symbol in POPULAR_STOCKS:
         try:
             response = requests.get(
-                f"{FINNHUB_BASE_URL}/quote?symbol={symbol}&token={FINNHUB_API_KEY}"
+                f"{FINNHUB_BASE_URL}/quote?symbol={symbol}&token={FINNHUB_API_KEY}",
+                timeout=10
             )
-            if response.status_code == 200:
-                cache["stock_quotes"][symbol] = response.json()
-                print(f"{symbol} fiyatı güncellendi")
-            else:
-                print(f"{symbol} fiyatı güncellenemedi: {response.status_code}")
-                
+            response.raise_for_status()
+            cache["stock_quotes"][symbol] = response.json()
+            logger.info(f"{symbol} fiyatı güncellendi")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"{symbol} fiyatı güncellenemedi (Request Hatası): {e}")
         except Exception as e:
-            print(f"{symbol} için hata: {e}")
-    
+            logger.error(f"{symbol} fiyatı için genel hata: {e}")
+
     cache["last_updated"]["stock_quotes"] = datetime.now()
 
 # Şirket profillerini çekme
 def fetch_company_profiles():
-    print(f"Şirket profilleri güncelleniyor: {datetime.now()}")
+    logger.info(f"Şirket profilleri güncelleniyor: {datetime.now()}")
+    if not FINNHUB_API_KEY:
+        logger.error("Finnhub API anahtarı eksik, şirket profilleri çekilemiyor.")
+        return
+
     for symbol in POPULAR_STOCKS:
         try:
             response = requests.get(
-                f"{FINNHUB_BASE_URL}/stock/profile2?symbol={symbol}&token={FINNHUB_API_KEY}"
+                f"{FINNHUB_BASE_URL}/stock/profile2?symbol={symbol}&token={FINNHUB_API_KEY}",
+                timeout=10
             )
-            if response.status_code == 200:
-                cache["company_profiles"][symbol] = response.json()
-                print(f"{symbol} profili güncellendi")
-            else:
-                print(f"{symbol} profili güncellenemedi: {response.status_code}")
-                
+            response.raise_for_status()
+            cache["company_profiles"][symbol] = response.json()
+            logger.info(f"{symbol} profili güncellendi")
+        except requests.exceptions.RequestException as e:
+            logger.error(f"{symbol} profili güncellenemedi (Request Hatası): {e}")
         except Exception as e:
-            print(f"{symbol} profili için hata: {e}")
-    
+            logger.error(f"{symbol} profili için genel hata: {e}")
+
     cache["last_updated"]["company_profiles"] = datetime.now()
 
 # Piyasa haberlerini çekme
 def fetch_market_news():
-    print(f"Piyasa haberleri güncelleniyor: {datetime.now()}")
+    logger.info(f"Piyasa haberleri güncelleniyor: {datetime.now()}")
+    if not FINNHUB_API_KEY:
+        logger.error("Finnhub API anahtarı eksik, piyasa haberleri çekilemiyor.")
+        return
+
     try:
         response = requests.get(
-            f"{FINNHUB_BASE_URL}/news?category=general&token={FINNHUB_API_KEY}"
+            f"{FINNHUB_BASE_URL}/news?category=general&token={FINNHUB_API_KEY}",
+            timeout=10
         )
-        if response.status_code == 200:
-            cache["market_news"] = response.json()
-            print("Piyasa haberleri güncellendi")
-        else:
-            print(f"Piyasa haberleri güncellenemedi: {response.status_code}")
-            
+        response.raise_for_status()
+        cache["market_news"] = response.json()
+        logger.info("Piyasa haberleri güncellendi")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Piyasa haberleri güncellenemedi (Request Hatası): {e}")
     except Exception as e:
-        print(f"Piyasa haberleri için hata: {e}")
-    
+        logger.error(f"Piyasa haberleri için genel hata: {e}")
+
     cache["last_updated"]["market_news"] = datetime.now()
 
 # Zamanlanmış görevleri başlatma
 @app.on_event("startup")
 def start_scheduler():
-    scheduler = BackgroundScheduler()
+    logger.info("Zamanlayıcı başlatılıyor...")
+    scheduler = BackgroundScheduler(timezone="UTC") # Zaman dilimi belirtmek iyi olabilir
     # Her 5 dakikada bir hisse fiyatlarını güncelle
-    scheduler.add_job(fetch_stock_quotes, 'interval', minutes=5)
-    # Her gün şirket profillerini güncelle
-    scheduler.add_job(fetch_company_profiles, 'interval', hours=24)
-    # Her 30 dakikada bir haberleri güncelle
-    scheduler.add_job(fetch_market_news, 'interval', minutes=30)
-    scheduler.start()
+    scheduler.add_job(fetch_stock_quotes, 'interval', minutes=5, id="fetch_quotes_job")
+    # Her saat başı şirket profillerini güncelle (daha sık kontrol için)
+    scheduler.add_job(fetch_company_profiles, 'interval', hours=1, id="fetch_profiles_job")
+    # Her 15 dakikada bir haberleri güncelle (daha sık kontrol için)
+    scheduler.add_job(fetch_market_news, 'interval', minutes=15, id="fetch_news_job")
     
-    # İlk verileri hemen çek
-    fetch_stock_quotes()
-    fetch_company_profiles()
-    fetch_market_news()
+    try:
+        scheduler.start()
+        logger.info("Zamanlayıcı başarıyla başlatıldı.")
+    except Exception as e:
+        logger.critical(f"Zamanlayıcı başlatılamadı: {e}", exc_info=True)
 
 # API endpoint'leri
 
@@ -133,6 +161,9 @@ async def get_stock_quote(symbol: str):
     Hisse senedi fiyat bilgilerini döndürür.
     Önbellekte varsa ve son 5 dakika içinde güncellendiyse, önbellekten döndürür.
     """
+    if not FINNHUB_API_KEY:
+        raise HTTPException(status_code=503, detail="Finnhub API anahtarı yapılandırılmamış.")
+
     # Önbellekte varsa ve son 5 dakika içinde güncellendiyse, önbellekten döndür
     if (symbol in cache["stock_quotes"] and 
         "stock_quotes" in cache["last_updated"] and
@@ -142,17 +173,19 @@ async def get_stock_quote(symbol: str):
     # Yoksa veya güncel değilse, Finnhub'dan çek
     try:
         response = requests.get(
-            f"{FINNHUB_BASE_URL}/quote?symbol={symbol}&token={FINNHUB_API_KEY}"
+            f"{FINNHUB_BASE_URL}/quote?symbol={symbol}&token={FINNHUB_API_KEY}",
+            timeout=10 # Timeout zaten eklenmişti, kontrol
         )
-        if response.status_code == 200:
-            data = response.json()
-            cache["stock_quotes"][symbol] = data
-            return data
-        else:
-            raise HTTPException(status_code=response.status_code, 
-                               detail=f"Failed to fetch quote: {response.status_code}")
+        response.raise_for_status() # HTTP hatası varsa exception fırlat
+        data = response.json()
+        cache["stock_quotes"][symbol] = data
+        return data
+    except requests.exceptions.RequestException as e:
+        logger.error(f"/api/stock/quote - {symbol} için Finnhub API hatası: {e}") # Endpoint loglaması
+        raise HTTPException(status_code=e.response.status_code if e.response else 502, detail=f"Finnhub API'den veri alınamadı: {e}") # 502 Bad Gateway
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"/api/stock/quote - {symbol} için beklenmedik hata: {e}", exc_info=True) # Traceback logla
+        raise HTTPException(status_code=500, detail=f"İç sunucu hatası.") # Detayı gizle
 
 @app.get("/api/stock/profile")
 async def get_company_profile(symbol: str):
@@ -160,6 +193,9 @@ async def get_company_profile(symbol: str):
     Şirket profil bilgilerini döndürür.
     Önbellekte varsa ve son 24 saat içinde güncellendiyse, önbellekten döndürür.
     """
+    if not FINNHUB_API_KEY:
+        raise HTTPException(status_code=503, detail="Finnhub API anahtarı yapılandırılmamış.")
+
     # Önbellekte varsa ve son 24 saat içinde güncellendiyse, önbellekten döndür
     if (symbol in cache["company_profiles"] and 
         "company_profiles" in cache["last_updated"] and
@@ -169,17 +205,19 @@ async def get_company_profile(symbol: str):
     # Yoksa veya güncel değilse, Finnhub'dan çek
     try:
         response = requests.get(
-            f"{FINNHUB_BASE_URL}/stock/profile2?symbol={symbol}&token={FINNHUB_API_KEY}"
+            f"{FINNHUB_BASE_URL}/stock/profile2?symbol={symbol}&token={FINNHUB_API_KEY}",
+            timeout=10
         )
-        if response.status_code == 200:
-            data = response.json()
-            cache["company_profiles"][symbol] = data
-            return data
-        else:
-            raise HTTPException(status_code=response.status_code, 
-                               detail=f"Failed to fetch company profile: {response.status_code}")
+        response.raise_for_status()
+        data = response.json()
+        cache["company_profiles"][symbol] = data
+        return data
+    except requests.exceptions.RequestException as e:
+        logger.error(f"/api/stock/profile - {symbol} için Finnhub API hatası: {e}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 502, detail=f"Finnhub API'den veri alınamadı: {e}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"/api/stock/profile - {symbol} için beklenmedik hata: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="İç sunucu hatası.")
 
 @app.get("/api/stock/candles")
 async def get_stock_candles(symbol: str, resolution: str, from_time: int, to_time: int):
@@ -187,6 +225,9 @@ async def get_stock_candles(symbol: str, resolution: str, from_time: int, to_tim
     Hisse senedi grafik verilerini döndürür.
     Önbellekte varsa ve sorgu parametreleri aynıysa, önbellekten döndürür.
     """
+    if not FINNHUB_API_KEY:
+        raise HTTPException(status_code=503, detail="Finnhub API anahtarı yapılandırılmamış.")
+
     cache_key = f"{symbol}_{resolution}_{from_time}_{to_time}"
     
     # Önbellekte varsa ve aynı sorgu parametreleriyle, önbellekten döndür
@@ -196,17 +237,24 @@ async def get_stock_candles(symbol: str, resolution: str, from_time: int, to_tim
     # Yoksa, Finnhub'dan çek
     try:
         response = requests.get(
-            f"{FINNHUB_BASE_URL}/stock/candle?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}&token={FINNHUB_API_KEY}"
+            f"{FINNHUB_BASE_URL}/stock/candle?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}&token={FINNHUB_API_KEY}",
+            timeout=15 # Grafik verisi daha uzun sürebilir
         )
-        if response.status_code == 200:
-            data = response.json()
-            cache["stock_candles"][cache_key] = data
-            return data
-        else:
-            raise HTTPException(status_code=response.status_code, 
-                               detail=f"Failed to fetch stock candles: {response.status_code}")
+        response.raise_for_status()
+        data = response.json()
+        # Mum verisinin boş olup olmadığını kontrol et (Finnhub bazen boş 's' ile dönebilir)
+        if data.get('s') == 'no_data':
+             logger.warning(f'/api/stock/candles - {symbol} için veri bulunamadı.')
+             # Boş veri için 404 döndürebiliriz
+             raise HTTPException(status_code=404, detail="Belirtilen aralık için grafik verisi bulunamadı.")
+        cache["stock_candles"][cache_key] = data
+        return data
+    except requests.exceptions.RequestException as e:
+        logger.error(f"/api/stock/candles - {symbol} için Finnhub API hatası: {e}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 502, detail=f"Finnhub API'den veri alınamadı: {e}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"/api/stock/candles - {symbol} için beklenmedik hata: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="İç sunucu hatası.")
 
 @app.get("/api/news/company")
 async def get_company_news(symbol: str, count: int = 10):
@@ -214,6 +262,9 @@ async def get_company_news(symbol: str, count: int = 10):
     Şirket haberlerini döndürür.
     Önbellekte varsa ve son 30 dakika içinde güncellendiyse, önbellekten döndürür.
     """
+    if not FINNHUB_API_KEY:
+        raise HTTPException(status_code=503, detail="Finnhub API anahtarı yapılandırılmamış.")
+
     # Önbellekte varsa ve son 30 dakika içinde güncellendiyse, önbellekten döndür
     if (symbol in cache["company_news"] and 
         f"company_news_{symbol}" in cache["last_updated"] and
@@ -229,18 +280,20 @@ async def get_company_news(symbol: str, count: int = 10):
         to_date = now.strftime("%Y-%m-%d")
         
         response = requests.get(
-            f"{FINNHUB_BASE_URL}/company-news?symbol={symbol}&from={from_date}&to={to_date}&token={FINNHUB_API_KEY}"
+            f"{FINNHUB_BASE_URL}/company-news?symbol={symbol}&from={from_date}&to={to_date}&token={FINNHUB_API_KEY}",
+            timeout=15
         )
-        if response.status_code == 200:
-            data = response.json()
-            cache["company_news"][symbol] = data
-            cache["last_updated"][f"company_news_{symbol}"] = datetime.now()
-            return data[:count]
-        else:
-            raise HTTPException(status_code=response.status_code, 
-                               detail=f"Failed to fetch company news: {response.status_code}")
+        response.raise_for_status()
+        data = response.json()
+        cache["company_news"][symbol] = data
+        cache["last_updated"][f"company_news_{symbol}"] = datetime.now()
+        return data[:count]
+    except requests.exceptions.RequestException as e:
+        logger.error(f"/api/news/company - {symbol} için Finnhub API hatası: {e}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 502, detail=f"Finnhub API'den veri alınamadı: {e}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"/api/news/company - {symbol} için beklenmedik hata: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="İç sunucu hatası.")
 
 @app.get("/api/news/market")
 async def get_market_news(count: int = 10):
@@ -248,6 +301,9 @@ async def get_market_news(count: int = 10):
     Piyasa haberlerini döndürür.
     Önbellekte varsa ve son 30 dakika içinde güncellendiyse, önbellekten döndürür.
     """
+    if not FINNHUB_API_KEY:
+        raise HTTPException(status_code=503, detail="Finnhub API anahtarı yapılandırılmamış.")
+
     # Önbellekte varsa ve son 30 dakika içinde güncellendiyse, önbellekten döndür
     if (cache["market_news"] and 
         "market_news" in cache["last_updated"] and
@@ -257,18 +313,20 @@ async def get_market_news(count: int = 10):
     # Yoksa veya güncel değilse, Finnhub'dan çek
     try:
         response = requests.get(
-            f"{FINNHUB_BASE_URL}/news?category=general&token={FINNHUB_API_KEY}"
+            f"{FINNHUB_BASE_URL}/news?category=general&token={FINNHUB_API_KEY}",
+            timeout=10
         )
-        if response.status_code == 200:
-            data = response.json()
-            cache["market_news"] = data
-            cache["last_updated"]["market_news"] = datetime.now()
-            return data[:count]
-        else:
-            raise HTTPException(status_code=response.status_code, 
-                               detail=f"Failed to fetch market news: {response.status_code}")
+        response.raise_for_status()
+        data = response.json()
+        cache["market_news"] = data
+        cache["last_updated"]["market_news"] = datetime.now()
+        return data[:count]
+    except requests.exceptions.RequestException as e:
+        logger.error(f"/api/news/market için Finnhub API hatası: {e}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 502, detail=f"Finnhub API'den veri alınamadı: {e}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"/api/news/market için beklenmedik hata: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="İç sunucu hatası.")
 
 @app.get("/api/search")
 async def search_stocks(query: str):
@@ -276,6 +334,9 @@ async def search_stocks(query: str):
     Hisse senedi arama sonuçlarını döndürür.
     Önbellekte varsa ve son 24 saat içinde güncellendiyse, önbellekten döndürür.
     """
+    if not FINNHUB_API_KEY:
+        raise HTTPException(status_code=503, detail="Finnhub API anahtarı yapılandırılmamış.")
+
     # Önbellekte varsa ve son 24 saat içinde güncellendiyse, önbellekten döndür
     if (query in cache["search_results"] and 
         f"search_{query}" in cache["last_updated"] and
@@ -285,75 +346,77 @@ async def search_stocks(query: str):
     # Yoksa veya güncel değilse, Finnhub'dan çek
     try:
         response = requests.get(
-            f"{FINNHUB_BASE_URL}/search?q={query}&token={FINNHUB_API_KEY}"
+            f"{FINNHUB_BASE_URL}/search?q={query}&token={FINNHUB_API_KEY}",
+            timeout=10
         )
-        if response.status_code == 200:
-            data = response.json()
-            
-            # Popüler ABD hisseleri için özel durum
-            results = data.get('result', [])
-            
-            # Popüler hisseler sözlüğü
-            popular_stocks = {
-                'apple': {'symbol': 'AAPL', 'description': 'Apple Inc.'},
-                'microsoft': {'symbol': 'MSFT', 'description': 'Microsoft Corporation'},
-                'google': {'symbol': 'GOOGL', 'description': 'Alphabet Inc.'},
-                'amazon': {'symbol': 'AMZN', 'description': 'Amazon.com Inc.'},
-                'tesla': {'symbol': 'TSLA', 'description': 'Tesla, Inc.'},
-                'meta': {'symbol': 'META', 'description': 'Meta Platforms, Inc.'},
-                'netflix': {'symbol': 'NFLX', 'description': 'Netflix, Inc.'},
-                'nvidia': {'symbol': 'NVDA', 'description': 'NVIDIA Corporation'},
-                'disney': {'symbol': 'DIS', 'description': 'The Walt Disney Company'},
-                'coca': {'symbol': 'KO', 'description': 'The Coca-Cola Company'},
-                'pepsi': {'symbol': 'PEP', 'description': 'PepsiCo, Inc.'},
-                'walmart': {'symbol': 'WMT', 'description': 'Walmart Inc.'},
-                'mcdonalds': {'symbol': 'MCD', 'description': 'McDonald\'s Corporation'},
-                'nike': {'symbol': 'NKE', 'description': 'NIKE, Inc.'},
-                'intel': {'symbol': 'INTC', 'description': 'Intel Corporation'},
-                'amd': {'symbol': 'AMD', 'description': 'Advanced Micro Devices, Inc.'},
-                'ford': {'symbol': 'F', 'description': 'Ford Motor Company'},
-                'gm': {'symbol': 'GM', 'description': 'General Motors Company'},
-                'boeing': {'symbol': 'BA', 'description': 'The Boeing Company'},
-                'visa': {'symbol': 'V', 'description': 'Visa Inc.'},
-                'mastercard': {'symbol': 'MA', 'description': 'Mastercard Incorporated'},
-                'paypal': {'symbol': 'PYPL', 'description': 'PayPal Holdings, Inc.'},
-                'bank of america': {'symbol': 'BAC', 'description': 'Bank of America Corporation'},
-                'jpmorgan': {'symbol': 'JPM', 'description': 'JPMorgan Chase & Co.'},
-                'goldman': {'symbol': 'GS', 'description': 'The Goldman Sachs Group, Inc.'},
-            }
-            
-            # Eğer arama sorgusu popüler bir hisse ile eşleşiyorsa, onu listenin başına ekle
-            for entry_key, entry_value in popular_stocks.items():
-                if (query.lower() in entry_key or 
-                    entry_value['description'].lower().find(query.lower()) != -1 or
-                    entry_value['symbol'].lower() == query.lower()):
-                    
-                    # Eğer bu hisse zaten sonuçlarda yoksa ekle
-                    if not any(result.get('symbol') == entry_value['symbol'] for result in results):
-                        results.insert(0, {
-                            'symbol': entry_value['symbol'],
-                            'description': entry_value['description'],
-                            'type': 'Common Stock',
-                            'displaySymbol': entry_value['symbol']
-                        })
-            
-            # ABD borsalarındaki hisseleri önceliklendirme
-            filtered_results = [
-                result for result in results
-                if not result.get('symbol', '').find('.') != -1 or 
-                   result.get('symbol', '').endswith('.US') or 
-                   any(exchange in result.get('description', '').upper() 
-                       for exchange in ['NYSE', 'NASDAQ', 'AMEX'])
-            ]
-            
-            cache["search_results"][query] = filtered_results
-            cache["last_updated"][f"search_{query}"] = datetime.now()
-            return filtered_results
-        else:
-            raise HTTPException(status_code=response.status_code, 
-                               detail=f"Failed to search stocks: {response.status_code}")
+        response.raise_for_status()
+        data = response.json()
+        
+        # Popüler ABD hisseleri için özel durum
+        results = data.get('result', [])
+        
+        # Popüler hisseler sözlüğü
+        popular_stocks = {
+            'apple': {'symbol': 'AAPL', 'description': 'Apple Inc.'},
+            'microsoft': {'symbol': 'MSFT', 'description': 'Microsoft Corporation'},
+            'google': {'symbol': 'GOOGL', 'description': 'Alphabet Inc.'},
+            'amazon': {'symbol': 'AMZN', 'description': 'Amazon.com Inc.'},
+            'tesla': {'symbol': 'TSLA', 'description': 'Tesla, Inc.'},
+            'meta': {'symbol': 'META', 'description': 'Meta Platforms, Inc.'},
+            'netflix': {'symbol': 'NFLX', 'description': 'Netflix, Inc.'},
+            'nvidia': {'symbol': 'NVDA', 'description': 'NVIDIA Corporation'},
+            'disney': {'symbol': 'DIS', 'description': 'The Walt Disney Company'},
+            'coca': {'symbol': 'KO', 'description': 'The Coca-Cola Company'},
+            'pepsi': {'symbol': 'PEP', 'description': 'PepsiCo, Inc.'},
+            'walmart': {'symbol': 'WMT', 'description': 'Walmart Inc.'},
+            'mcdonalds': {'symbol': 'MCD', 'description': 'McDonald\'s Corporation'},
+            'nike': {'symbol': 'NKE', 'description': 'NIKE, Inc.'},
+            'intel': {'symbol': 'INTC', 'description': 'Intel Corporation'},
+            'amd': {'symbol': 'AMD', 'description': 'Advanced Micro Devices, Inc.'},
+            'ford': {'symbol': 'F', 'description': 'Ford Motor Company'},
+            'gm': {'symbol': 'GM', 'description': 'General Motors Company'},
+            'boeing': {'symbol': 'BA', 'description': 'The Boeing Company'},
+            'visa': {'symbol': 'V', 'description': 'Visa Inc.'},
+            'mastercard': {'symbol': 'MA', 'description': 'Mastercard Incorporated'},
+            'paypal': {'symbol': 'PYPL', 'description': 'PayPal Holdings, Inc.'},
+            'bank of america': {'symbol': 'BAC', 'description': 'Bank of America Corporation'},
+            'jpmorgan': {'symbol': 'JPM', 'description': 'JPMorgan Chase & Co.'},
+            'goldman': {'symbol': 'GS', 'description': 'The Goldman Sachs Group, Inc.'},
+        }
+        
+        # Eğer arama sorgusu popüler bir hisse ile eşleşiyorsa, onu listenin başına ekle
+        for entry_key, entry_value in popular_stocks.items():
+            if (query.lower() in entry_key or 
+                entry_value['description'].lower().find(query.lower()) != -1 or
+                entry_value['symbol'].lower() == query.lower()):
+                
+                # Eğer bu hisse zaten sonuçlarda yoksa ekle
+                if not any(result.get('symbol') == entry_value['symbol'] for result in results):
+                    results.insert(0, {
+                        'symbol': entry_value['symbol'],
+                        'description': entry_value['description'],
+                        'type': 'Common Stock',
+                        'displaySymbol': entry_value['symbol']
+                    })
+        
+        # ABD borsalarındaki hisseleri önceliklendirme
+        filtered_results = [
+            result for result in results
+            if not result.get('symbol', '').find('.') != -1 or 
+               result.get('symbol', '').endswith('.US') or 
+               any(exchange in result.get('description', '').upper() 
+                   for exchange in ['NYSE', 'NASDAQ', 'AMEX'])
+        ]
+        
+        cache["search_results"][query] = filtered_results
+        cache["last_updated"][f"search_{query}"] = datetime.now()
+        return filtered_results
+    except requests.exceptions.RequestException as e:
+        logger.error(f"/api/search - '{query}' için Finnhub API hatası: {e}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 502, detail=f"Finnhub API'den veri alınamadı: {e}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"/api/search - '{query}' için beklenmedik hata: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="İç sunucu hatası.")
 
 @app.get("/api/popular-stocks")
 async def get_popular_stocks():
@@ -361,11 +424,18 @@ async def get_popular_stocks():
     Popüler hisse senetlerinin fiyat ve profil bilgilerini döndürür.
     Önbellekte varsa ve son 5 dakika içinde güncellendiyse, önbellekten döndürür.
     """
+    if not FINNHUB_API_KEY:
+        raise HTTPException(status_code=503, detail="Finnhub API anahtarı yapılandırılmamış.")
+
     # Önbellekte varsa ve son 5 dakika içinde güncellendiyse, önbellekten döndür
+    # Profil önbelleğini de kontrol et ve ikisinin de güncel olduğundan emin ol
     if ("stock_quotes" in cache["last_updated"] and
-        datetime.now() - cache["last_updated"]["stock_quotes"] < timedelta(minutes=5)):
+        "company_profiles" in cache["last_updated"] and
+        datetime.now() - cache["last_updated"]["stock_quotes"] < timedelta(minutes=5) and
+        datetime.now() - cache["last_updated"]["company_profiles"] < timedelta(minutes=5)):
         
         result = []
+        missing_data = False
         for symbol in POPULAR_STOCKS:
             if symbol in cache["stock_quotes"] and symbol in cache["company_profiles"]:
                 quote = cache["stock_quotes"][symbol]
@@ -379,29 +449,24 @@ async def get_popular_stocks():
                     "changePercent": quote.get("dp", 0),
                     "logo": profile.get("logo", "")
                 })
+            else:
+                missing_data = True # Eksik veri varsa işaretle
         
-        return result
+        # Eğer veri eksik değilse ve güncelse önbellekten dön
+        if not missing_data:
+            return result
+        else:
+            logger.info("Popüler hisse senedi verileri önbellekte eksik veya eski, yeniden çekiliyor...")
     
-    # Yoksa veya güncel değilse, verileri güncelle ve döndür
-    fetch_stock_quotes()
-    fetch_company_profiles()
-    
-    result = []
-    for symbol in POPULAR_STOCKS:
-        if symbol in cache["stock_quotes"] and symbol in cache["company_profiles"]:
-            quote = cache["stock_quotes"][symbol]
-            profile = cache["company_profiles"][symbol]
-            
-            result.append({
-                "symbol": symbol,
-                "name": profile.get("name", ""),
-                "price": quote.get("c", 0),
-                "change": quote.get("d", 0),
-                "changePercent": quote.get("dp", 0),
-                "logo": profile.get("logo", "")
-            })
-    
-    return result
+    # Yoksa, güncel değilse veya eksikse, verileri güncelle ve döndür
+    # Not: Bu endpoint'in kendisi doğrudan fetch yapmamalı, scheduler'ın güncellemesini beklemeli
+    # Şimdilik, scheduler'a güvenelim ve hata döndürelim veya boş liste
+    logger.warning("Popüler hisse senedi verileri güncel değil veya eksik. Lütfen daha sonra tekrar deneyin.")
+    # fetch_stock_quotes() # Bunu burada çağırmak performansı etkiler
+    # fetch_company_profiles() # Bunu burada çağırmak performansı etkiler
+
+    # Güncel veri yoksa, geçici olarak hata döndür
+    raise HTTPException(status_code=503, detail="Popüler hisse senedi verileri henüz hazır değil veya güncel değil. Lütfen birkaç dakika sonra tekrar deneyin.")
 
 @app.post("/api/analysis")
 async def get_ai_analysis(symbol: str, company_name: str, price: float, change: float):
@@ -409,6 +474,9 @@ async def get_ai_analysis(symbol: str, company_name: str, price: float, change: 
     Hisse senedi için AI analizi döndürür.
     Önbellekte varsa ve son 24 saat içinde güncellendiyse, önbellekten döndürür.
     """
+    if not OPENROUTER_API_KEY:
+        raise HTTPException(status_code=503, detail="OpenRouter API anahtarı yapılandırılmamış.")
+
     cache_key = f"{symbol}_{price}_{change}"
     
     # Önbellekte varsa ve son 24 saat içinde güncellendiyse, önbellekten döndür
@@ -427,7 +495,7 @@ async def get_ai_analysis(symbol: str, company_name: str, price: float, change: 
                 'HTTP-Referer': 'https://finsight.app',
             },
             json={
-                'model': 'anthropic/claude-3-haiku',
+                'model': 'deepseek/deepseek-r1-distill-qwen-32b', # Model adı değişmiş olabilir, kontrol edin
                 'messages': [
                     {
                         'role': 'system',
@@ -444,15 +512,24 @@ async def get_ai_analysis(symbol: str, company_name: str, price: float, change: 
         
         if response.status_code == 200:
             data = response.json()
-            analysis = data['choices'][0]['message']['content']
-            cache["ai_analysis"][cache_key] = analysis
-            cache["last_updated"][f"ai_analysis_{cache_key}"] = datetime.now()
-            return {"analysis": analysis}
+            # Yanıt formatını daha dikkatli kontrol et
+            if 'choices' in data and len(data['choices']) > 0 and 'message' in data['choices'][0] and 'content' in data['choices'][0]['message']:
+                 analysis = data['choices'][0]['message']['content']
+                 cache["ai_analysis"][cache_key] = analysis
+                 cache["last_updated"][f"ai_analysis_{cache_key}"] = datetime.now()
+                 return {"analysis": analysis}
+            else:
+                 logger.error(f"/api/analysis - {symbol} için OpenRouter'dan geçersiz yanıt formatı: {data}")
+                 raise HTTPException(status_code=502, detail="AI analizinden geçersiz yanıt alındı.")
         else:
             raise HTTPException(status_code=response.status_code, 
                                detail=f"Failed to get AI analysis: {response.status_code}")
+    except requests.exceptions.RequestException as e:
+        logger.error(f"/api/analysis - {symbol} için OpenRouter API hatası: {e}")
+        raise HTTPException(status_code=e.response.status_code if e.response else 502, detail=f"OpenRouter API'den veri alınamadı: {e}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"/api/analysis - {symbol} için beklenmedik hata: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="İç sunucu hatası.")
 
 # Uygulama durumu endpoint'i
 @app.get("/api/status")
@@ -480,6 +557,9 @@ async def get_status():
 # Uygulamayı çalıştırma (doğrudan bu dosya çalıştırıldığında)
 if __name__ == "__main__":
     import uvicorn
-    import os
+    # import os # Zaten yukarıda import edildi
     port = int(os.environ.get("PORT", 8080))
-    uvicorn.run("main:app", host="0.0.0.0", port=port)
+    logger.info(f"Uvicorn sunucusu {port} portunda başlatılıyor...")
+    # Gunicorn yerine Uvicorn ile çalıştırırken reload flag'ı geliştirme içindir
+    # Cloud Run'da gunicorn kullanıldığı için bu kısım sadece lokal test içindir
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=False) # Cloud Run için reload=False olmalı
