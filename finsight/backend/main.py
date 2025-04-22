@@ -9,6 +9,7 @@ from dotenv import load_dotenv
 from typing import Dict, List, Optional, Any
 import time
 import logging
+from pydantic import BaseModel, Field
 
 # .env dosyasından çevresel değişkenleri yükle
 load_dotenv()
@@ -52,7 +53,6 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 cache = {
     "stock_quotes": {},       # Hisse senedi fiyatları
     "company_profiles": {},   # Şirket profilleri
-    "stock_candles": {},      # Grafik verileri
     "company_news": {},       # Şirket haberleri
     "market_news": [],        # Piyasa haberleri
     "search_results": {},     # Arama sonuçları
@@ -136,8 +136,8 @@ def fetch_market_news():
 def start_scheduler():
     logger.info("Zamanlayıcı başlatılıyor...")
     scheduler = BackgroundScheduler(timezone="UTC") # Zaman dilimi belirtmek iyi olabilir
-    # Her 5 dakikada bir hisse fiyatlarını güncelle
-    scheduler.add_job(fetch_stock_quotes, 'interval', minutes=5, id="fetch_quotes_job")
+    # Her 30 dakikada bir hisse fiyatlarını güncelle
+    scheduler.add_job(fetch_stock_quotes, 'interval', minutes=30, id="fetch_quotes_job")
     # Her saat başı şirket profillerini güncelle (daha sık kontrol için)
     scheduler.add_job(fetch_company_profiles, 'interval', hours=1, id="fetch_profiles_job")
     # Her 15 dakikada bir haberleri güncelle (daha sık kontrol için)
@@ -217,43 +217,6 @@ async def get_company_profile(symbol: str):
         raise HTTPException(status_code=e.response.status_code if e.response else 502, detail=f"Finnhub API'den veri alınamadı: {e}")
     except Exception as e:
         logger.error(f"/api/stock/profile - {symbol} için beklenmedik hata: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="İç sunucu hatası.")
-
-@app.get("/api/stock/candles")
-async def get_stock_candles(symbol: str, resolution: str, from_time: int, to_time: int):
-    """
-    Hisse senedi grafik verilerini döndürür.
-    Önbellekte varsa ve sorgu parametreleri aynıysa, önbellekten döndürür.
-    """
-    if not FINNHUB_API_KEY:
-        raise HTTPException(status_code=503, detail="Finnhub API anahtarı yapılandırılmamış.")
-
-    cache_key = f"{symbol}_{resolution}_{from_time}_{to_time}"
-    
-    # Önbellekte varsa ve aynı sorgu parametreleriyle, önbellekten döndür
-    if cache_key in cache["stock_candles"]:
-        return cache["stock_candles"][cache_key]
-    
-    # Yoksa, Finnhub'dan çek
-    try:
-        response = requests.get(
-            f"{FINNHUB_BASE_URL}/stock/candle?symbol={symbol}&resolution={resolution}&from={from_time}&to={to_time}&token={FINNHUB_API_KEY}",
-            timeout=15 # Grafik verisi daha uzun sürebilir
-        )
-        response.raise_for_status()
-        data = response.json()
-        # Mum verisinin boş olup olmadığını kontrol et (Finnhub bazen boş 's' ile dönebilir)
-        if data.get('s') == 'no_data':
-             logger.warning(f'/api/stock/candles - {symbol} için veri bulunamadı.')
-             # Boş veri için 404 döndürebiliriz
-             raise HTTPException(status_code=404, detail="Belirtilen aralık için grafik verisi bulunamadı.")
-        cache["stock_candles"][cache_key] = data
-        return data
-    except requests.exceptions.RequestException as e:
-        logger.error(f"/api/stock/candles - {symbol} için Finnhub API hatası: {e}")
-        raise HTTPException(status_code=e.response.status_code if e.response else 502, detail=f"Finnhub API'den veri alınamadı: {e}")
-    except Exception as e:
-        logger.error(f"/api/stock/candles - {symbol} için beklenmedik hata: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="İç sunucu hatası.")
 
 @app.get("/api/news/company")
@@ -461,21 +424,33 @@ async def get_popular_stocks():
     # Yoksa, güncel değilse veya eksikse, verileri güncelle ve döndür
     # Not: Bu endpoint'in kendisi doğrudan fetch yapmamalı, scheduler'ın güncellemesini beklemeli
     # Şimdilik, scheduler'a güvenelim ve hata döndürelim veya boş liste
-    logger.warning("Popüler hisse senedi verileri güncel değil veya eksik. Lütfen daha sonra tekrar deneyin.")
+    logger.warning("Popüler hisse senedi verileri güncel değil veya eksik. Lütfen birkaç dakika sonra tekrar deneyin.")
     # fetch_stock_quotes() # Bunu burada çağırmak performansı etkiler
     # fetch_company_profiles() # Bunu burada çağırmak performansı etkiler
 
     # Güncel veri yoksa, geçici olarak hata döndür
     raise HTTPException(status_code=503, detail="Popüler hisse senedi verileri henüz hazır değil veya güncel değil. Lütfen birkaç dakika sonra tekrar deneyin.")
 
+# Pydantic model for AI Analysis request
+class AnalysisRequest(BaseModel):
+    symbol: str
+    company_name: str
+    price: float
+    change: float
+
 @app.post("/api/analysis")
-async def get_ai_analysis(symbol: str, company_name: str, price: float, change: float):
+async def get_ai_analysis(request_data: AnalysisRequest):
     """
     Hisse senedi için AI analizi döndürür.
     Önbellekte varsa ve son 24 saat içinde güncellendiyse, önbellekten döndürür.
     """
     if not OPENROUTER_API_KEY:
         raise HTTPException(status_code=503, detail="OpenRouter API anahtarı yapılandırılmamış.")
+
+    symbol = request_data.symbol
+    company_name = request_data.company_name
+    price = request_data.price
+    change = request_data.change
 
     cache_key = f"{symbol}_{price}_{change}"
     
@@ -495,7 +470,7 @@ async def get_ai_analysis(symbol: str, company_name: str, price: float, change: 
                 'HTTP-Referer': 'https://finsight.app',
             },
             json={
-                'model': 'deepseek/deepseek-r1-distill-qwen-32b', # Model adı değişmiş olabilir, kontrol edin
+                'model': 'deepseek/deepseek-r1-distill-qwen-32b',
                 'messages': [
                     {
                         'role': 'system',
@@ -504,32 +479,24 @@ async def get_ai_analysis(symbol: str, company_name: str, price: float, change: 
                     {
                         'role': 'user',
                         'content': f'Provide a brief analysis for {company_name} ({symbol}). Current price: ${price}, Change: {"+" + str(change) if change > 0 else str(change)}'
-                   }
+                    }
                 ],
                 'max_tokens': 300,
             }
         )
-        
+
         if response.status_code == 200:
-            data = response.json()
-            # Yanıt formatını daha dikkatli kontrol et
-            if 'choices' in data and len(data['choices']) > 0 and 'message' in data['choices'][0] and 'content' in data['choices'][0]['message']:
-                 analysis = data['choices'][0]['message']['content']
-                 cache["ai_analysis"][cache_key] = analysis
-                 cache["last_updated"][f"ai_analysis_{cache_key}"] = datetime.now()
-                 return {"analysis": analysis}
-            else:
-                 logger.error(f"/api/analysis - {symbol} için OpenRouter'dan geçersiz yanıt formatı: {data}")
-                 raise HTTPException(status_code=502, detail="AI analizinden geçersiz yanıt alındı.")
+            result = response.json()
+            analysis = result.get('choices', [{}])[0].get('message', {}).get('content', '')
+            cache["ai_analysis"][cache_key] = analysis
+            cache["last_updated"][f"ai_analysis_{cache_key}"] = datetime.now()
+            return {"analysis": analysis}
         else:
-            raise HTTPException(status_code=response.status_code, 
-                               detail=f"Failed to get AI analysis: {response.status_code}")
-    except requests.exceptions.RequestException as e:
-        logger.error(f"/api/analysis - {symbol} için OpenRouter API hatası: {e}")
-        raise HTTPException(status_code=e.response.status_code if e.response else 502, detail=f"OpenRouter API'den veri alınamadı: {e}")
+            logger.error(f"/api/analysis - OpenRouter API hatası: {response.status_code}, {response.text}")
+            raise HTTPException(status_code=response.status_code, detail=f"OpenRouter API hatası: {response.text}")
     except Exception as e:
-        logger.error(f"/api/analysis - {symbol} için beklenmedik hata: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="İç sunucu hatası.")
+        logger.error(f"/api/analysis - Beklenmedik hata: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="AI analizi alınırken hata oluştu.")
 
 # Uygulama durumu endpoint'i
 @app.get("/api/status")
@@ -543,7 +510,6 @@ async def get_status():
         "cache_info": {
             "stock_quotes_count": len(cache["stock_quotes"]),
             "company_profiles_count": len(cache["company_profiles"]),
-            "stock_candles_count": len(cache["stock_candles"]),
             "company_news_count": len(cache["company_news"]),
             "market_news_count": len(cache["market_news"]),
             "search_results_count": len(cache["search_results"]),
