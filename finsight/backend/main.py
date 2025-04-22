@@ -494,7 +494,7 @@ async def get_ai_analysis(request_data: AnalysisRequest):
                 'HTTP-Referer': 'https://finsight.app',
             },
             json={
-                'model': 'deepseek/deepseek-chat-v3-0324',
+                'model': 'meta-llama/llama-4-maverick:free',
                 'messages': [
                     {
                         'role': 'system',
