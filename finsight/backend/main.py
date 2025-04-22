@@ -417,14 +417,22 @@ async def get_popular_stocks():
         logger.warning("/api/popular-stocks - Genel popüler hisse senedi verisi 10 dakikadan eski veya zaman damgası eksik.")
         data_is_potentially_stale = True # Bu aslında bir hata değil, sadece bilgi
 
+    company_profiles = cache.get("company_profiles", {}) # Profil önbelleğini al
     if "popular_stocks" in cache:
         for symbol in POPULAR_STOCKS:
             if symbol in cache["popular_stocks"]:
                 stock_cache_entry = cache["popular_stocks"][symbol]
                 if isinstance(stock_cache_entry, dict) and required_keys.issubset(stock_cache_entry.keys()):
                     # Sembol için veri varsa ve gerekli anahtarları içeriyorsa ekle
-                    stock_data = stock_cache_entry.copy() # Kopyasını alarak çalışmak daha güvenli
-                    stock_data['symbol'] = symbol # Sembolü veriye ekleyelim frontend için kolaylık
+                    # Frontend'in bekleme ihtimali olan anahtarlarla yeni bir dict oluştur
+                    stock_data = {
+                        'symbol': symbol,
+                        'name': company_profiles.get(symbol, {}).get('name', 'Unknown Company'), # Profil önbelleğinden adı al
+                        'price': stock_cache_entry.get('c'),
+                        'change': stock_cache_entry.get('d'),
+                        'percentChange': stock_cache_entry.get('dp')
+                        # İhtiyaç olursa diğer Finnhub anahtarları da eklenebilir (h, l, o, pc, t)
+                    }
                     result_stocks.append(stock_data)
                     # logger.debug(f"/api/popular-stocks - {symbol} listeye eklendi.") # Çok fazla log olmaması için yorumda
                 else:
