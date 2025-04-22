@@ -470,7 +470,7 @@ async def get_ai_analysis(request_data: AnalysisRequest):
                 'HTTP-Referer': 'https://finsight.app',
             },
             json={
-                'model': 'deepseek/deepseek-r1-distill-qwen-32b',
+                'model': 'deepseek/deepseek-chat-v3-0324',
                 'messages': [
                     {
                         'role': 'system',
