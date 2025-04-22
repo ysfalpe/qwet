@@ -485,11 +485,14 @@ async def get_ai_analysis(request_data: AnalysisRequest):
             }
         )
 
+        logger.info(f"/api/analysis - OpenRouter API yanıt alındı (Sembol: {symbol}): {response.text[:200]}...") # Yanıt çok uzunsa kısaltarak logla
+
         if response.status_code == 200:
             result = response.json()
             analysis = result.get('choices', [{}])[0].get('message', {}).get('content', '')
             cache["ai_analysis"][cache_key] = analysis
             cache["last_updated"][f"ai_analysis_{cache_key}"] = datetime.now()
+            logger.info(f"/api/analysis - Başarılı yanıt gönderiliyor (Sembol: {symbol})")
             return {"analysis": analysis}
         else:
             logger.error(f"/api/analysis - OpenRouter API hatası: {response.status_code}, {response.text}")
