@@ -389,29 +389,40 @@ async def get_popular_stocks():
     result_stocks = []
     data_is_potentially_stale = False
 
+    logger.info(f"/api/popular-stocks - Çağrı başlangıcı. Önbellek durumu: popular_stocks var mı? {'popular_stocks' in cache}, last_updated var mı? {'last_updated' in cache and 'popular_stocks' in cache.get('last_updated', {})}")
+    if 'popular_stocks' in cache:
+         logger.debug(f"/api/popular-stocks - Önbellekteki popüler hisse anahtarları: {list(cache['popular_stocks'].keys())}") # Sadece anahtarları logla
+
     # Genel veri yaşı kontrolü (Sadece uyarı için, 10 dk'dan eski ise)
     if not ("last_updated" in cache and "popular_stocks" in cache["last_updated"] and
             datetime.now() - cache["last_updated"]["popular_stocks"] < timedelta(minutes=10)):
-        logger.warning("/api/popular-stocks - Genel popüler hisse senedi verisi 10 dakikadan eski olabilir.")
-        data_is_potentially_stale = True
+        logger.warning("/api/popular-stocks - Genel popüler hisse senedi verisi 10 dakikadan eski veya zaman damgası eksik.")
+        data_is_potentially_stale = True # Bu aslında bir hata değil, sadece bilgi
 
     if "popular_stocks" in cache:
         for symbol in POPULAR_STOCKS:
-            if symbol in cache["popular_stocks"] and required_keys.issubset(cache["popular_stocks"][symbol].keys()):
-                # Sembol için veri varsa ve gerekli anahtarları içeriyorsa ekle
-                stock_data = cache["popular_stocks"][symbol].copy() # Kopyasını alarak çalışmak daha güvenli
-                stock_data['symbol'] = symbol # Sembolü veriye ekleyelim frontend için kolaylık
-                result_stocks.append(stock_data)
+            if symbol in cache["popular_stocks"]:
+                stock_cache_entry = cache["popular_stocks"][symbol]
+                if isinstance(stock_cache_entry, dict) and required_keys.issubset(stock_cache_entry.keys()):
+                    # Sembol için veri varsa ve gerekli anahtarları içeriyorsa ekle
+                    stock_data = stock_cache_entry.copy() # Kopyasını alarak çalışmak daha güvenli
+                    stock_data['symbol'] = symbol # Sembolü veriye ekleyelim frontend için kolaylık
+                    result_stocks.append(stock_data)
+                    # logger.debug(f"/api/popular-stocks - {symbol} listeye eklendi.") # Çok fazla log olmaması için yorumda
+                else:
+                    # Sembol için veri var ama eksik veya yanlış formatta
+                    actual_keys = stock_cache_entry.keys() if isinstance(stock_cache_entry, dict) else "Veri dict değil"
+                    logger.warning(f"/api/popular-stocks - {symbol} için önbellekte veri var ama gerekli anahtarlar eksik/yanlış formatta. Beklenen: {required_keys}, Bulunan: {actual_keys}")
             else:
-                # Sembol için veri yoksa veya eksikse logla (ama hata verme)
-                logger.warning(f"/api/popular-stocks - {symbol} için önbellekte veri yok veya eksik.")
+                # Sembol için veri yoksa logla (ama hata verme)
+                logger.warning(f"/api/popular-stocks - {symbol} için önbellekte veri yok.")
 
     if not result_stocks:
-        # Eğer *hiç* veri bulunamazsa (örn. uygulama yeni başladıysa), o zaman hata verelim.
-        logger.error("/api/popular-stocks - Önbellekte hiç popüler hisse senedi verisi bulunamadı.")
+        # Eğer *hiç* veri bulunamazsa (örn. uygulama yeni başladıysa veya tümü eksikse), o zaman hata verelim.
+        logger.error("/api/popular-stocks - Önbellekte gösterilecek hiç popüler hisse senedi verisi bulunamadı (result_stocks boş). Cache popular_stocks içeriği (ilk 5): {str(cache.get('popular_stocks', {}))[:500]}")
         raise HTTPException(
             status_code=503, # Service Unavailable
-            detail="Popüler hisse senedi verileri şu anda alınamıyor. Lütfen birkaç dakika sonra tekrar deneyin."
+            detail="Popüler hisse senedi verileri şu anda alınamıyor veya eksik. Lütfen birkaç dakika sonra tekrar deneyin."
         )
 
     logger.info(f"/api/popular-stocks - {len(result_stocks)} adet popüler hisse senedi döndürülüyor.")
