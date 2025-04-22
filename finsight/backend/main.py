@@ -70,6 +70,7 @@ def fetch_stock_quotes():
         logger.error("Finnhub API anahtarı eksik, hisse fiyatları çekilemiyor.")
         return
 
+    current_quotes = {}
     for symbol in POPULAR_STOCKS:
         try:
             response = requests.get(
@@ -77,13 +78,14 @@ def fetch_stock_quotes():
                 timeout=10
             )
             response.raise_for_status()
-            cache["stock_quotes"][symbol] = response.json()
+            current_quotes[symbol] = response.json()
             logger.info(f"{symbol} fiyatı güncellendi")
         except requests.exceptions.RequestException as e:
             logger.error(f"{symbol} fiyatı güncellenemedi (Request Hatası): {e}")
         except Exception as e:
             logger.error(f"{symbol} fiyatı için genel hata: {e}")
 
+    cache["popular_stocks"] = current_quotes
     cache["last_updated"]["stock_quotes"] = datetime.now()
 
 # Şirket profillerini çekme
