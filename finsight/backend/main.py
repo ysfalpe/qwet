@@ -85,8 +85,18 @@ def fetch_stock_quotes():
         except Exception as e:
             logger.error(f"{symbol} fiyatı için genel hata: {e}")
 
+    # Önbelleğe yazmadan hemen önce log ekle
+    logger.info(f"fetch_stock_quotes - Önbelleğe yazılacak {len(current_quotes)} adet hisse verisi hazır.")
+    
     cache["popular_stocks"] = current_quotes
-    cache["last_updated"]["stock_quotes"] = datetime.now()
+    
+    # Önbelleğe yazdıktan hemen sonra log ekle
+    logger.info(f"fetch_stock_quotes - Popüler hisse verileri cache['popular_stocks']'a yazıldı.")
+
+    # last_updated zaman damgasını DOĞRU anahtar için güncelle
+    if "last_updated" not in cache: # Bu kontrol zaten yukarıda vardı ama tekrar ekleyelim
+        cache["last_updated"] = {}
+    cache["last_updated"]["popular_stocks"] = datetime.now() # 'stock_quotes' yerine 'popular_stocks'
 
 # Şirket profillerini çekme
 def fetch_company_profiles():
