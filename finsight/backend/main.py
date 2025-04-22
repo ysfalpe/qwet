@@ -136,8 +136,8 @@ def fetch_market_news():
 def start_scheduler():
     logger.info("Zamanlayıcı başlatılıyor...")
     scheduler = BackgroundScheduler(timezone="UTC") # Zaman dilimi belirtmek iyi olabilir
-    # Her 30 dakikada bir hisse fiyatlarını güncelle
-    scheduler.add_job(fetch_stock_quotes, 'interval', minutes=30, id="fetch_quotes_job")
+    # Her 1 dakikada bir hisse fiyatlarını güncelle
+    scheduler.add_job(fetch_stock_quotes, 'interval', minutes=1, id="fetch_quotes_job")
     # Her saat başı şirket profillerini güncelle (daha sık kontrol için)
     scheduler.add_job(fetch_company_profiles, 'interval', hours=1, id="fetch_profiles_job")
     # Her 15 dakikada bir haberleri güncelle (daha sık kontrol için)
