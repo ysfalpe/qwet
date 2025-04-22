@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 import requests
@@ -383,53 +383,40 @@ async def search_stocks(query: str):
 
 @app.get("/api/popular-stocks")
 async def get_popular_stocks():
-    """
-    Popüler hisse senetlerinin fiyat ve profil bilgilerini döndürür.
-    Önbellekte varsa ve son 5 dakika içinde güncellendiyse, önbellekten döndürür.
-    """
-    if not FINNHUB_API_KEY:
-        raise HTTPException(status_code=503, detail="Finnhub API anahtarı yapılandırılmamış.")
+    """Popüler hisse senetlerinin güncel fiyatlarını döndürür. Eksik veya eski veri varsa bile mevcut olanı döndürmeye çalışır."""
+    global cache
+    required_keys = {'c', 'd', 'dp', 'h', 'l', 'o', 'pc', 't'} # Finnhub /quote'dan beklenen temel anahtarlar
+    result_stocks = []
+    data_is_potentially_stale = False
 
-    # Önbellekte varsa ve son 5 dakika içinde güncellendiyse, önbellekten döndür
-    # Profil önbelleğini de kontrol et ve ikisinin de güncel olduğundan emin ol
-    if ("stock_quotes" in cache["last_updated"] and
-        "company_profiles" in cache["last_updated"] and
-        datetime.now() - cache["last_updated"]["stock_quotes"] < timedelta(minutes=5) and
-        datetime.now() - cache["last_updated"]["company_profiles"] < timedelta(minutes=5)):
-        
-        result = []
-        missing_data = False
+    # Genel veri yaşı kontrolü (Sadece uyarı için, 10 dk'dan eski ise)
+    if not ("last_updated" in cache and "popular_stocks" in cache["last_updated"] and
+            datetime.now() - cache["last_updated"]["popular_stocks"] < timedelta(minutes=10)):
+        logger.warning("/api/popular-stocks - Genel popüler hisse senedi verisi 10 dakikadan eski olabilir.")
+        data_is_potentially_stale = True
+
+    if "popular_stocks" in cache:
         for symbol in POPULAR_STOCKS:
-            if symbol in cache["stock_quotes"] and symbol in cache["company_profiles"]:
-                quote = cache["stock_quotes"][symbol]
-                profile = cache["company_profiles"][symbol]
-                
-                result.append({
-                    "symbol": symbol,
-                    "name": profile.get("name", ""),
-                    "price": quote.get("c", 0),
-                    "change": quote.get("d", 0),
-                    "changePercent": quote.get("dp", 0),
-                    "logo": profile.get("logo", "")
-                })
+            if symbol in cache["popular_stocks"] and required_keys.issubset(cache["popular_stocks"][symbol].keys()):
+                # Sembol için veri varsa ve gerekli anahtarları içeriyorsa ekle
+                stock_data = cache["popular_stocks"][symbol].copy() # Kopyasını alarak çalışmak daha güvenli
+                stock_data['symbol'] = symbol # Sembolü veriye ekleyelim frontend için kolaylık
+                result_stocks.append(stock_data)
             else:
-                missing_data = True # Eksik veri varsa işaretle
-        
-        # Eğer veri eksik değilse ve güncelse önbellekten dön
-        if not missing_data:
-            return result
-        else:
-            logger.info("Popüler hisse senedi verileri önbellekte eksik veya eski, yeniden çekiliyor...")
-    
-    # Yoksa, güncel değilse veya eksikse, verileri güncelle ve döndür
-    # Not: Bu endpoint'in kendisi doğrudan fetch yapmamalı, scheduler'ın güncellemesini beklemeli
-    # Şimdilik, scheduler'a güvenelim ve hata döndürelim veya boş liste
-    logger.warning("Popüler hisse senedi verileri güncel değil veya eksik. Lütfen birkaç dakika sonra tekrar deneyin.")
-    # fetch_stock_quotes() # Bunu burada çağırmak performansı etkiler
-    # fetch_company_profiles() # Bunu burada çağırmak performansı etkiler
+                # Sembol için veri yoksa veya eksikse logla (ama hata verme)
+                logger.warning(f"/api/popular-stocks - {symbol} için önbellekte veri yok veya eksik.")
 
-    # Güncel veri yoksa, geçici olarak hata döndür
-    raise HTTPException(status_code=503, detail="Popüler hisse senedi verileri henüz hazır değil veya güncel değil. Lütfen birkaç dakika sonra tekrar deneyin.")
+    if not result_stocks:
+        # Eğer *hiç* veri bulunamazsa (örn. uygulama yeni başladıysa), o zaman hata verelim.
+        logger.error("/api/popular-stocks - Önbellekte hiç popüler hisse senedi verisi bulunamadı.")
+        raise HTTPException(
+            status_code=503, # Service Unavailable
+            detail="Popüler hisse senedi verileri şu anda alınamıyor. Lütfen birkaç dakika sonra tekrar deneyin."
+        )
+
+    logger.info(f"/api/popular-stocks - {len(result_stocks)} adet popüler hisse senedi döndürülüyor.")
+    # İsteğe bağlı: Yanıta 'is_stale': data_is_potentially_stale eklenebilir.
+    return {"stocks": result_stocks}
 
 # Pydantic model for AI Analysis request
 class AnalysisRequest(BaseModel):
