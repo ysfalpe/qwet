@@ -148,12 +148,18 @@ def fetch_market_news():
 def start_scheduler():
     logger.info("Zamanlayıcı başlatılıyor...")
     scheduler = BackgroundScheduler(timezone="UTC") # Zaman dilimi belirtmek iyi olabilir
-    # Her 1 dakikada bir hisse fiyatlarını güncelle
-    scheduler.add_job(fetch_stock_quotes, 'interval', minutes=1, id="fetch_quotes_job")
-    # Her saat başı şirket profillerini güncelle (daha sık kontrol için)
-    scheduler.add_job(fetch_company_profiles, 'interval', hours=1, id="fetch_profiles_job")
-    # Her 15 dakikada bir haberleri güncelle (daha sık kontrol için)
-    scheduler.add_job(fetch_market_news, 'interval', minutes=15, id="fetch_news_job")
+    
+    # Uygulama başlarken hemen ilk veriyi çek!
+    try:
+        fetch_stock_quotes()
+        logger.info("Uygulama başlangıcında popüler hisse verileri başarıyla çekildi.")
+    except Exception as e:
+        logger.error(f"Uygulama başlangıcında fetch_stock_quotes hatası: {e}")
+        
+    # Sonra düzenli aralıklarla çalıştır
+    scheduler.add_job(fetch_stock_quotes, 'interval', minutes=1, id="fetch_quotes_job", replace_existing=True)
+    scheduler.add_job(fetch_company_profiles, 'interval', hours=1, id="fetch_profiles_job", replace_existing=True)
+    scheduler.add_job(fetch_market_news, 'interval', minutes=15, id="fetch_news_job", replace_existing=True)
     
     try:
         scheduler.start()
