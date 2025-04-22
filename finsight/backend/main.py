@@ -494,11 +494,16 @@ async def get_ai_analysis(request_data: AnalysisRequest):
                 'HTTP-Referer': 'https://finsight.app',
             },
             json={
-                'model': 'meta-llama/llama-4-maverick:free',
+                'model': 'google/gemini-2.5-pro-exp-03-25:free',
                 'messages': [
                     {
                         'role': 'system',
-                        'content': 'You are a financial analyst AI assistant. Provide a brief, professional analysis of the stock based on the information provided. Focus on recent performance, potential factors affecting the stock, and a very brief outlook. Keep your response under 200 words and focus on facts rather than speculation.'
+                        'content': (
+                            'You are an expert stock analyst skilled in both technical and fundamental analysis. '
+                            'Provide a concise, professional analysis of the stock below. Focus on recent price action, key technical indicators, fundamental strengths/weaknesses, and any notable news or events. '
+                            'Conclude your analysis with a clear signal: BUY, HOLD, or SELL (in uppercase, as the final word). '
+                            'Keep your response under 200 words and avoid speculation.'
+                        )
                     },
                     {
                         'role': 'user',
