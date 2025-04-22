@@ -494,7 +494,7 @@ async def get_ai_analysis(request_data: AnalysisRequest):
                 'HTTP-Referer': 'https://finsight.app',
             },
             json={
-                'model': 'google/gemini-2.5-pro-exp-03-25:free',
+                'model': 'meta-llama/llama-4-maverick:free',
                 'messages': [
                     {
                         'role': 'system',
